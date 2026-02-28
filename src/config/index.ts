@@ -28,10 +28,20 @@ const getRequiredEnv = (key: string): string => {
   return value;
 };
 
+const getOptionalEnv = (key: string): string | undefined => {
+  const value = process.env[key];
+  if (!value) {
+    console.warn(`[CONFIG] Optional environment variable not set: ${key}`);
+    return undefined;
+  }
+  return value;
+};
+
 const config: Config = {
   supabase: {
     url: getRequiredEnv('SUPABASE_URL'),
-    anonKey: getRequiredEnv('SUPABASE_ANON_KEY'),
+    // anon key is optional on server-side; service role key is required
+    anonKey: getOptionalEnv('SUPABASE_ANON_KEY') || '',
     serviceRoleKey: getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY'),
   },
   app: {
@@ -39,9 +49,9 @@ const config: Config = {
     port: parseInt(process.env.PORT || '3000', 10),
   },
   mercadoLivre: {
-    clientId: getRequiredEnv('ML_CLIENT_ID'),
-    clientSecret: getRequiredEnv('ML_CLIENT_SECRET'),
-    redirectUri: getRequiredEnv('ML_REDIRECT_URI'),
+    clientId: getOptionalEnv('ML_CLIENT_ID') || '',
+    clientSecret: getOptionalEnv('ML_CLIENT_SECRET') || '',
+    redirectUri: getOptionalEnv('ML_REDIRECT_URI') || '',
   },
 };
 
