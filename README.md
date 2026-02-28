@@ -1,5 +1,8 @@
 # NFe Automation — Backend (minimal scaffold)
 
+**Deployment Status**: 🚀 Live on Render  
+**Last Deployed**: February 28, 2026
+
 Run the backend locally for development.
 
 Local setup
