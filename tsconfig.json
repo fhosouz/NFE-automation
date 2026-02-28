@@ -3,7 +3,8 @@
     "target": "ES2020",
     "module": "CommonJS",
     "outDir": "dist",
-    "rootDir": "src",
+    // development config compiles sources and tests together, so rootDir is project root
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
