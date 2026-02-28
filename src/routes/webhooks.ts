@@ -6,7 +6,7 @@
  * Returns 200 immediately for idempotency and reliable delivery
  */
 
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import { handleMercadoLivreWebhook } from '@/services/webhookHandler';
 import { verifyWebhookSignature } from '@/services/signatureVerification';
 import { MercadoLivreWebhookPayload } from '@/types/webhook';
@@ -17,10 +17,10 @@ const router = Router();
  * POST /webhook/ml
  * Receive and process Mercado Livre webhooks
  */
-router.post('/ml', async (req: Request, res: Response) => {
+router.post('/ml', async (req: any, res: any) => {
   try {
     // Get signature header for verification
-    const xSignature = req.headers['x-signature'] as string | undefined;
+    const xSignature = (req.headers as any)['x-signature'] as string | undefined;
 
     // Verify signature (MVP: basic validation)
     const signatureResult = verifyWebhookSignature(

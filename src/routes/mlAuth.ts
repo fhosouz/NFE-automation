@@ -6,7 +6,7 @@
  *                                     persists credentials and seller info.
  */
 
-import { Router, Request, Response, CookieOptions } from 'express';
+import { Router } from 'express';
 import crypto from 'crypto';
 // oauth/token requests use global fetch (Node 18+) so we avoid extra dependencies
 import config from '@/config';
@@ -15,7 +15,7 @@ import { createMercadoLivreClient } from '@/services/mercadolivreClient';
 
 const router = Router();
 const STATE_COOKIE = 'ml_oauth_state';
-const COOKIE_OPTIONS: CookieOptions = { httpOnly: true, secure: true, sameSite: 'lax' };
+const COOKIE_OPTIONS: any = { httpOnly: true, secure: true, sameSite: 'lax' };
 
 // Helper to generate random state
 const generateState = (): string => crypto.randomBytes(16).toString('hex');
@@ -23,7 +23,7 @@ const generateState = (): string => crypto.randomBytes(16).toString('hex');
 /**
  * Start OAuth2 flow by redirecting user to ML authorization URL
  */
-router.get('/ml/oauth/start', (req: Request, res: Response) => {
+router.get('/ml/oauth/start', (req: any, res: any) => {
   const state = generateState();
   const authUrl = new URL('https://auth.mercadolivre.com.br/authorization');
   authUrl.searchParams.set('response_type', 'code');
@@ -39,7 +39,7 @@ router.get('/ml/oauth/start', (req: Request, res: Response) => {
 /**
  * OAuth callback handler: exchange code for tokens and persist seller record
  */
-router.get('/ml/oauth/callback', async (req: Request, res: Response) => {
+router.get('/ml/oauth/callback', async (req: any, res: any) => {
   const { code, state, error, error_description } = req.query as any;
   const storedState = req.cookies?.[STATE_COOKIE];
 
