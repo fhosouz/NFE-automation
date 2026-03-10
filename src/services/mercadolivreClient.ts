@@ -63,6 +63,20 @@ export class MercadoLivreClient {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.redirectUrl = redirectUrl;
+
+    // warn early if configuration looks incomplete; avoids obscure 400s
+    if (!this.clientId || !this.clientSecret) {
+      console.warn(
+        '[ML_CLIENT] Warning: clientId or clientSecret is empty. ' +
+          'Set ML_CLIENT_ID and ML_CLIENT_SECRET in environment.'
+      );
+    }
+    if (!this.redirectUrl) {
+      console.warn(
+        '[ML_CLIENT] Warning: redirectUrl is not configured. ' +
+          'Set ML_REDIRECT_URI and ensure it matches the app configuration on Mercado Livre.'
+      );
+    }
   }
 
   /**
@@ -132,6 +146,13 @@ export class MercadoLivreClient {
       }
 
       const data = (await response.json()) as MLAuthToken;
+
+      // store token for immediate use so subsequent calls (e.g. fetchSeller)
+      // don't trigger a new client-credentials request with potentially
+      // invalid/empty credentials.
+      this.accessToken = data.access_token;
+      this.tokenExpiry = Date.now() + (data.expires_in - 300) * 1000;
+
       return data;
     } catch (error) {
       console.error('[ML_CLIENT] Code exchange error:', error);
@@ -206,11 +227,19 @@ export class MercadoLivreClient {
 export const createMercadoLivreClient = (): MercadoLivreClient => {
   const clientId = process.env.ML_CLIENT_ID;
   const clientSecret = process.env.ML_CLIENT_SECRET;
-  const redirectUrl = process.env.ML_URL_REDIRECT;
+  // use canonical name first, fall back to alias
+  const redirectUrl = process.env.ML_REDIRECT_URI || process.env.ML_URL_REDIRECT;
 
   if (!clientId || !clientSecret || !redirectUrl) {
     throw new Error(
-      'Missing Mercado Livre credentials: ML_CLIENT_ID, ML_CLIENT_SECRET, ML_URL_REDIRECT'
+      'Missing Mercado Livre credentials: ML_CLIENT_ID, ML_CLIENT_SECRET, ' +
+        'and ML_REDIRECT_URI (or ML_URL_REDIRECT as alias)'
+    );
+  }
+
+  if (!process.env.ML_REDIRECT_URI && process.env.ML_URL_REDIRECT) {
+    console.warn(
+      '[ML_CLIENT] using ML_URL_REDIRECT as redirect URI; consider renaming to ML_REDIRECT_URI'
     );
   }
 

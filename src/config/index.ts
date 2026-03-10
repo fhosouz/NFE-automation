@@ -51,7 +51,20 @@ const config: Config = {
   mercadoLivre: {
     clientId: getOptionalEnv('ML_CLIENT_ID') || '',
     clientSecret: getOptionalEnv('ML_CLIENT_SECRET') || '',
-    redirectUri: getOptionalEnv('ML_REDIRECT_URI') || '',
+    // the variable used by the code is ML_REDIRECT_URI; some deploys (e.g.
+    // Render) might have inadvertently named it ML_URL_REDIRECT, so support
+    // both. Warn if the alias is used in case the canonical name is changed
+    // later.
+    redirectUri: (() => {
+      const canonical = process.env['ML_REDIRECT_URI'];
+      const alias = process.env['ML_URL_REDIRECT'];
+      if (alias && !canonical) {
+        console.warn(
+          '[CONFIG] using ML_URL_REDIRECT as fallback for ML_REDIRECT_URI'
+        );
+      }
+      return canonical || alias || '';
+    })(),
   },
 };
 
