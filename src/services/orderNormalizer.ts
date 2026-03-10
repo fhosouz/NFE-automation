@@ -82,6 +82,7 @@ export const normalizeOrder = (mlOrder: any): NormalizedOrder => {
     customer: {
       ml_customer_id: buyer.id?.toString() || '',
       nickname: buyer.nickname || '',
+      cpf_cnpj: buyer.cpf_cnpj, // preserve CPF/CNPJ if ML provides it in buyer object
     },
     products,
     shipping: normalizedShipping,

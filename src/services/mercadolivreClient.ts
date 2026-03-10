@@ -52,6 +52,12 @@ interface MLOrderResponse {
  * Uses OAuth2 with client credentials
  */
 export class MercadoLivreClient {
+  // add setter for external token
+  public setAccessToken(token: string, expiresAt: number) {
+    this.accessToken = token;
+    this.tokenExpiry = expiresAt;
+  }
+
   private baseUrl: string = 'https://api.mercadolibre.com';
   private clientId: string;
   private clientSecret: string;
@@ -224,7 +230,16 @@ export class MercadoLivreClient {
 /**
  * Factory to create ML client from environment variables
  */
-export const createMercadoLivreClient = (): MercadoLivreClient => {
+export interface SellerCredentials {
+  access_token: string;
+  refresh_token?: string;
+  expires_at: number;
+  scope: string;
+}
+
+export const createMercadoLivreClient = async (
+  sellerId?: string
+): Promise<MercadoLivreClient> => {
   const clientId = process.env.ML_CLIENT_ID;
   const clientSecret = process.env.ML_CLIENT_SECRET;
   // use canonical name first, fall back to alias
@@ -243,5 +258,22 @@ export const createMercadoLivreClient = (): MercadoLivreClient => {
     );
   }
 
-  return new MercadoLivreClient(clientId, clientSecret, redirectUrl);
+  const client = new MercadoLivreClient(clientId, clientSecret, redirectUrl);
+
+  // If a sellerId is provided, try to load that seller's stored token.
+  if (sellerId) {
+    try {
+      const { getSellerCredentials } = await import('./sellerService');
+      const creds = await getSellerCredentials(sellerId);
+      if (creds && creds.access_token) {
+        client.setAccessToken(creds.access_token, creds.expires_at);
+        console.log('[ML_CLIENT] initialized with seller access token');
+      }
+    } catch (err) {
+      console.warn('[ML_CLIENT] failed to load seller credentials', err);
+    }
+  }
+
+  return client;
 };
+

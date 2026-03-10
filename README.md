@@ -32,7 +32,11 @@ Environment
   OAuth dance, as the sample log above demonstrated.
 
 ## Real Mercado Livre Integration (Manual Testing)
-
+The backend now automatically uses the **seller's own access token** (stored
+in the database during the OAuth onboarding) when fetching order details. If
+no seller token is available it will fall back to the app-level client
+credentials, but pilot merchants should authenticate via the web UI first to
+ensure orders are pulled on their behalf.
 To exercise the full production flow with a real ML order you can run the
 integration script/test. First populate the following environment variables
 in your `.env` or CI profile:

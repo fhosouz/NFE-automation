@@ -58,7 +58,7 @@ router.get('/ml/oauth/callback', async (req: any, res: any) => {
 
   try {
     // Exchange authorization code for tokens (delegated to ML client)
-    const mlClient = createMercadoLivreClient();
+    const mlClient = await createMercadoLivreClient();
     const tokenData = await mlClient.exchangeCodeForToken(code as string);
     const mlUserId = tokenData.user_id?.toString();
 
