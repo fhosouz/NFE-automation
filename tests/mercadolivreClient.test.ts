@@ -2,7 +2,7 @@
  * Tests for Mercado Livre Client
  */
 
-import { MercadoLivreClient } from '@/services/mercadolivreClient';
+import { MercadoLivreClient, createMercadoLivreClient } from '@/services/mercadolivreClient';
 
 describe('MercadoLivreClient', () => {
   const clientId = 'test_client_id';
@@ -198,6 +198,141 @@ describe('MercadoLivreClient', () => {
       // Should only call fetch 3 times: token + 2 orders
       // (token should be cached)
       expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('Refresh and callback', () => {
+    it('refreshAccessToken should obtain new token and call callback', async () => {
+      client.setAccessToken('old', Date.now() - 1000, 'someRefresh');
+      const newToken = {
+        access_token: 'refreshed',
+        refresh_token: 'newRefresh',
+        token_type: 'Bearer',
+        expires_in: 1800,
+        scope: 'read',
+        user_id: 1,
+      };
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => newToken,
+      });
+
+      const cb = jest.fn(async () => {});
+      client.onTokenUpdate(cb);
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+      const result = await client.refreshAccessToken();
+      expect(result).toEqual(newToken);
+      expect(cb).toHaveBeenCalledWith(newToken);
+      expect(await (client as any)['getAccessToken']()).toBe('refreshed');
+      expect(logSpy).toHaveBeenCalled();
+      expect(logSpy.mock.calls[0][0]).toContain('token refreshed or exchanged');
+      logSpy.mockRestore();
+    });
+
+    it('getAccessToken should attempt refresh when expired', async () => {
+      client.setAccessToken('x', Date.now() - 1000, 'refreshX');
+      const newToken = {
+        access_token: 're2',
+        refresh_token: 'r2',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        scope: 'r',
+        user_id: 1,
+      };
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => newToken,
+      });
+
+      const token = await (client as any)['getAccessToken']();
+      expect(token).toBe('re2');
+    });
+
+    it('fetchOrder should retry when initial call yields 401', async () => {
+      // expired access token with refresh
+      client.setAccessToken('expired', Date.now() - 1000, 'refreshToken');
+      const orderResponse = { id: 'o1' } as any;
+      const refreshedToken = {
+        access_token: 'newtok',
+        refresh_token: 'rt',
+        token_type: 'Bearer',
+        expires_in: 1000,
+        scope: 's',
+        user_id: 1,
+      };
+      // mock sequence: first refresh, first order (401), second refresh, second order success
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({ ok: true, json: async () => refreshedToken })
+        .mockResolvedValueOnce({ ok: false, status: 401, statusText: 'Unauthorized' })
+        .mockResolvedValueOnce({ ok: true, json: async () => refreshedToken })
+        .mockResolvedValueOnce({ ok: true, json: async () => orderResponse });
+
+      const order = await client.fetchOrder('o1');
+      expect(order).toEqual(orderResponse);
+    });
+  });
+
+  describe('createMercadoLivreClient factory', () => {
+    beforeEach(() => {
+      // ensure environment is clean regardless of outside state
+      delete process.env.ML_CLIENT_ID;
+      delete process.env.ML_CLIENT_SECRET;
+      delete process.env.ML_REDIRECT_URI;
+      delete process.env.ML_URL_REDIRECT;
+    });
+
+    afterEach(() => {
+      delete process.env.ML_CLIENT_ID;
+      delete process.env.ML_CLIENT_SECRET;
+      delete process.env.ML_REDIRECT_URI;
+      delete process.env.ML_URL_REDIRECT;
+    });
+
+    it('throws if required env vars missing', async () => {
+      await expect(createMercadoLivreClient()).rejects.toThrow();
+    });
+
+    it('initializes with stored seller credentials and persists updates', async () => {
+      process.env.ML_CLIENT_ID = 'cid';
+      process.env.ML_CLIENT_SECRET = 'secret';
+      process.env.ML_REDIRECT_URI = 'https://r';
+
+      const sellerService = await import('@/services/sellerService');
+      const creds = {
+        access_token: 'stored',
+        refresh_token: 'storedRefresh',
+        expires_at: Date.now() + 5000,
+        scope: 's',
+      } as any;
+      jest.spyOn(sellerService, 'getSellerCredentials').mockResolvedValue(creds);
+      const updateSpy = jest
+        .spyOn(sellerService, 'updateSellerCredentials')
+        .mockResolvedValue();
+
+      const clientWithSeller = await createMercadoLivreClient('sellerX');
+      // after factory, token should have been set
+      // we also check callback by forcing a refresh
+      clientWithSeller.setAccessToken('stored', creds.expires_at, creds.refresh_token);
+      const newTok = {
+        access_token: 'after',
+        refresh_token: 'afterRefresh',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        scope: 's',
+        user_id: 1,
+      };
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => newTok,
+      });
+      await clientWithSeller.refreshAccessToken();
+      expect(updateSpy).toHaveBeenCalledWith('sellerX', {
+        access_token: 'after',
+        refresh_token: 'afterRefresh',
+        expires_at: expect.any(Number),
+        scope: 's',
+      });
     });
   });
 });

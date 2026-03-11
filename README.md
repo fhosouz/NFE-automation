@@ -31,6 +31,12 @@ Environment
   If any of these are missing you will see `Bad Request` errors during the
   OAuth dance, as the sample log above demonstrated.
 
+- Once a seller completes the OAuth flow, their access/refresh tokens are
+  stored in Supabase. The backend will automatically **refresh** an expired
+  access token when calling the ML API and persist the updated tokens back to
+  the database. This means you shouldn't need to re-authorize merchants unless
+  they explicitly revoke the app from their Mercado Livre account.
+
 ## Real Mercado Livre Integration (Manual Testing)
 The backend now automatically uses the **seller's own access token** (stored
 in the database during the OAuth onboarding) when fetching order details. If
@@ -45,6 +51,9 @@ in your `.env` or CI profile:
 ML_CLIENT_ID=<your ML app id>
 ML_CLIENT_SECRET=<your ML app secret>
 ML_URL_REDIRECT=<redirect URI if needed>
+# optional alias used by older deployments; the code now prefers
+# ML_REDIRECT_URI but falls back to this name for backwards compatibility.
+
 
 ML_TEST_ORDER_ID=<existing ML order id for testing>
 ML_TEST_SELLER_ID=<numeric seller id for that order>

@@ -52,10 +52,26 @@ interface MLOrderResponse {
  * Uses OAuth2 with client credentials
  */
 export class MercadoLivreClient {
+  // optional callback that consumers can register to be notified whenever
+  // the client obtains a fresh token from Mercado Livre (exchange or refresh).
+  private tokenUpdateCallback?: (token: MLAuthToken) => Promise<void>;
+
   // add setter for external token
-  public setAccessToken(token: string, expiresAt: number) {
+  public setAccessToken(token: string, expiresAt: number, refreshToken?: string) {
     this.accessToken = token;
     this.tokenExpiry = expiresAt;
+    if (refreshToken) {
+      this.refreshToken = refreshToken;
+    }
+  }
+
+  /**
+   * Register a callback invoked when a new MLAuthToken is received.  This
+   * allows higher-level logic (e.g. orderProcessor) to persist updated
+   * credentials for a seller.
+   */
+  public onTokenUpdate(cb: (token: MLAuthToken) => Promise<void>) {
+    this.tokenUpdateCallback = cb;
   }
 
   private baseUrl: string = 'https://api.mercadolibre.com';
@@ -63,6 +79,7 @@ export class MercadoLivreClient {
   private clientSecret: string;
   private redirectUrl: string;
   private accessToken: string | null = null;
+  private refreshToken: string | null = null;
   private tokenExpiry: number = 0;
 
   constructor(clientId: string, clientSecret: string, redirectUrl: string) {
@@ -95,8 +112,20 @@ export class MercadoLivreClient {
       return this.accessToken;
     }
 
-    // Request new token (using refresh token or client credentials)
-    // For MVP, assume we have a refresh token stored or use client credentials
+    // If we have a refresh token, try to refresh
+    if (this.refreshToken) {
+      try {
+        await this.refreshAccessToken();
+        if (this.accessToken) {
+          return this.accessToken;
+        }
+        // fallback to client credentials if refresh somehow didn't set one
+      } catch (err) {
+        console.warn('[ML_CLIENT] refresh failed, falling back to client-credentials', err);
+      }
+    }
+
+    // Request new token (using client credentials)
     try {
       const response = await fetch(`${this.baseUrl}/oauth/token`, {
         method: 'POST',
@@ -158,6 +187,16 @@ export class MercadoLivreClient {
       // invalid/empty credentials.
       this.accessToken = data.access_token;
       this.tokenExpiry = Date.now() + (data.expires_in - 300) * 1000;
+      if (data.refresh_token) {
+        this.refreshToken = data.refresh_token;
+      }
+
+      if (this.tokenUpdateCallback) {
+        // async notify but don't block the return path
+        this.tokenUpdateCallback(data).catch((e) =>
+          console.warn('[ML_CLIENT] token update callback failed', e)
+        );
+      }
 
       return data;
     } catch (error) {
@@ -167,10 +206,60 @@ export class MercadoLivreClient {
   }
 
   /**
+   * Use the refresh token to obtain a new access (and optionally refresh) token.
+   * Returns the raw MLAuthToken so callers can persist it if needed.
+   */
+  public async refreshAccessToken(): Promise<MLAuthToken> {
+    if (!this.refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/oauth/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+          refresh_token: this.refreshToken,
+        }).toString(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Refresh token request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = (await response.json()) as MLAuthToken;
+      this.accessToken = data.access_token;
+      this.tokenExpiry = Date.now() + (data.expires_in - 300) * 1000;
+      if (data.refresh_token) {
+        this.refreshToken = data.refresh_token;
+      }
+
+      console.log('[ML_CLIENT] token refreshed or exchanged; expiry', new Date(this.tokenExpiry).toISOString());
+
+      if (this.tokenUpdateCallback) {
+        this.tokenUpdateCallback(data).catch((e) =>
+          console.warn('[ML_CLIENT] token update callback failed', e)
+        );
+      }
+
+      return data;
+    } catch (err) {
+      console.error('[ML_CLIENT] refreshAccessToken error:', err);
+      throw err;
+    }
+  }
+
+  /**
    * Fetch order details from Mercado Livre API
    * GET /orders/{orderId}
    */
-  async fetchOrder(orderId: string): Promise<MLOrderResponse> {
+  async fetchOrder(orderId: string, _retry = false): Promise<MLOrderResponse> {
     const token = await this.getAccessToken();
 
     try {
@@ -190,8 +279,23 @@ export class MercadoLivreClient {
 
       const order = (await response.json()) as MLOrderResponse;
       return order;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`[ML_CLIENT] Error fetching order ${orderId}:`, error);
+      // if unauthorized and we haven't retried yet, attempt a refresh and try again
+      if (
+        !(_retry) &&
+        error.message &&
+        error.message.includes('401') &&
+        this.refreshToken
+      ) {
+        try {
+          await this.refreshAccessToken();
+          return this.fetchOrder(orderId, true);
+        } catch (refreshErr) {
+          // fall through to rethrow original error below
+          console.warn('[ML_CLIENT] retry after refresh failed', refreshErr);
+        }
+      }
       throw error;
     }
   }
@@ -260,17 +364,31 @@ export const createMercadoLivreClient = async (
 
   const client = new MercadoLivreClient(clientId, clientSecret, redirectUrl);
 
-  // If a sellerId is provided, try to load that seller's stored token.
+  // If a sellerId is provided, try to load that seller's stored token and
+  // register a callback so future refreshes are persisted automatically.
   if (sellerId) {
     try {
-      const { getSellerCredentials } = await import('./sellerService');
+      const { getSellerCredentials, updateSellerCredentials } =
+        await import('./sellerService');
       const creds = await getSellerCredentials(sellerId);
       if (creds && creds.access_token) {
-        client.setAccessToken(creds.access_token, creds.expires_at);
+        client.setAccessToken(creds.access_token, creds.expires_at, creds.refresh_token);
         console.log('[ML_CLIENT] initialized with seller access token');
       }
+
+      // registration ensures that whenever the client refreshes or exchanges a
+      // token, our database stays up to date.
+      client.onTokenUpdate(async (newToken) => {
+        // convert to SellerCredentials shape
+        await updateSellerCredentials(sellerId, {
+          access_token: newToken.access_token,
+          refresh_token: newToken.refresh_token,
+          expires_at: Date.now() + newToken.expires_in * 1000,
+          scope: newToken.scope,
+        });
+      });
     } catch (err) {
-      console.warn('[ML_CLIENT] failed to load seller credentials', err);
+      console.warn('[ML_CLIENT] failed to load or persist seller credentials', err);
     }
   }
 

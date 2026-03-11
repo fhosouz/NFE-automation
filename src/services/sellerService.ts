@@ -27,3 +27,22 @@ export const getSellerCredentials = async (
 
   return data?.mercadolivre_credentials || null;
 };
+
+/**
+ * Update stored Mercado Livre credentials for a seller.  This is used when a
+ * refresh token exchange returns a new access token or refresh token.
+ */
+export const updateSellerCredentials = async (
+  mlSellerId: string,
+  creds: SellerCredentials
+): Promise<void> => {
+  const { error } = await supabase
+    .from('sellers')
+    .update({ mercadolivre_credentials: creds })
+    .eq('ml_seller_id', mlSellerId);
+
+  if (error) {
+    console.error('[SELLER_SERVICE] error updating credentials', error);
+    throw error;
+  }
+};
